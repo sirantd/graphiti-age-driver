@@ -73,7 +73,7 @@ _PER_LABEL_BTREE = ((('uuid',), True), (('group_id', 'uuid'), False))
 _EXTRA_BTREE = (
     (ENTITY, ('name',), False),  # EntityNode.get_by_names
     (EPISODIC, ('valid_at',), False),  # retrieve_episodes: valid_at <= t, newest first
-    (SAGA, ('name',), False),  # retrieve_episodes of a saga: the saga by name
+    (SAGA, ('name',), False),  # the saga by name: retrieve_episodes, graphiti's saga lookup
     (RELATES_TO, ('name',), False),  # the edge-type search filter
 )
 BTREE_INDEXES: tuple[tuple[str, tuple[str, ...], bool], ...] = (
@@ -90,7 +90,7 @@ DEFAULT_EMBEDDING_DIM = 1024
 
 
 def literal(value: str) -> str:
-    """A SQL string literal of ``value``."""
+    """Return a SQL string literal of ``value``."""
     return "'" + value.replace("'", "''") + "'"
 
 
@@ -107,7 +107,7 @@ def prop(alias: str | None, name: str) -> str:
 
 
 def prop_text(alias: str | None, name: str) -> str:
-    """The text of a property: a string without its quotes, NULL if absent."""
+    """Return the text of a property: a string without its quotes, or NULL."""
     return f'({prop(alias, name)})::text'
 
 
@@ -174,13 +174,6 @@ def index_statements(graph: str, embedding_dim: int) -> list[str]:
         f'CREATE INDEX IF NOT EXISTS "{index_name(ENTITY, "gin", LABELS_PROPERTY)}" '
         f'ON {table(graph, ENTITY)} USING gin ({prop(None, LABELS_PROPERTY)})'
     )
-    # graphiti's own saga lookup (the generic query path) matches a pattern map,
-    # which AGE compiles to `properties @> {...}`. Only a GIN index over all
-    # properties serves that. A saga holds no embedding, so this index is small.
-    statements.append(
-        f'CREATE INDEX IF NOT EXISTS "{index_name(SAGA, "gin", "properties")}" '
-        f'ON {table(graph, SAGA)} USING gin (properties)'
-    )
     return statements
 
 
@@ -193,4 +186,3 @@ def index_names() -> Iterable[str]:
     for label, prop_name in VECTOR_PROPERTIES:
         yield index_name(label, 'hnsw', prop_name)
     yield index_name(ENTITY, 'gin', LABELS_PROPERTY)
-    yield index_name(SAGA, 'gin', 'properties')

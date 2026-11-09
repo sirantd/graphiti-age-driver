@@ -20,8 +20,10 @@ The rules for a plan, as in sirantd/cognee-age-adapter:
 
 ``WHOLE_GRAPH`` is the closed list of calls whose job is to read or delete a
 whole label. They are in the workload, so the census sees them, but their
-plans are not checked. graphiti's own Cypher on the generic path is not
-checked here either: ``driver.REVIEWED_QUERIES`` names it, with its plan.
+plans are not checked.
+
+graphiti's own Cypher on the generic path gets the same check: each text of
+``driver.REVIEWED_QUERIES`` runs with the parameters that graphiti sends.
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ from graphiti_core.search.search_filters import ComparisonOperator, DateFilter, 
 from psycopg import sql
 
 from graphiti_age_driver import AGEDriver
+from graphiti_age_driver.driver import REVIEWED_QUERIES
 from graphiti_age_driver.schema import EDGE_LABELS, VERTEX_LABELS
 
 pytestmark = pytest.mark.integration
@@ -378,6 +381,17 @@ def _searches() -> dict[str, Call]:
 # Methods that send no statement: they build filters for a caller.
 NO_STATEMENT = frozenset({'build_node_search_filters', 'build_edge_search_filters'})
 
+# The parameters that graphiti sends with each reviewed text of the generic path.
+_GENERIC_PARAMS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    'graphiti_core.graphiti.Graphiti._get_or_create_saga': lambda s: {
+        'name': s['saga'].name,
+        'group_id': GROUP,
+    },
+    'graphiti_core.graphiti.Graphiti.remove_episode': lambda s: {'uuid': s['alice'].uuid},
+}
+# The MCP get_status tool counts every vertex of the graph by design.
+WHOLE_GRAPH_GENERIC = frozenset({'mcp_server.graphiti_mcp_server.get_status'})
+
 
 async def _sync(value: Any) -> Any:
     return value
@@ -660,6 +674,33 @@ async def test_every_statement_reads_its_labels_through_an_index(driver):
     for name, statement, args in recorded:
         if name in WHOLE_GRAPH:
             continue
+        plan = _plan(statement, args)
+        if 'Disabled: true' in plan or _unindexed_label_scans(plan):
+            problems.append(f'[{name}]\n{statement}\n{plan}')
+    assert not problems, '\n\n'.join(problems)
+
+
+def test_the_generic_workload_covers_every_reviewed_query():
+    """🚨 A new reviewed text fails here until the generic workload runs it."""
+    assert set(_GENERIC_PARAMS).isdisjoint(WHOLE_GRAPH_GENERIC)
+    assert set(_GENERIC_PARAMS) | WHOLE_GRAPH_GENERIC == set(REVIEWED_QUERIES)
+
+
+async def test_every_reviewed_graphiti_query_reads_its_labels_through_an_index(driver):
+    seed = await _seed(driver)
+    recorded: list[tuple[str, Any]] = []
+    driver._store.statement_hooks.append(
+        lambda statement, args, kind: (
+            recorded.append((statement, args)) if kind == 'generic' else None
+        )
+    )
+
+    problems = []
+    for name, params in _GENERIC_PARAMS.items():
+        recorded.clear()
+        await driver.execute_query(REVIEWED_QUERIES[name], **params(seed))
+        assert len(recorded) == 1, name
+        statement, args = recorded[0]
         plan = _plan(statement, args)
         if 'Disabled: true' in plan or _unindexed_label_scans(plan):
             problems.append(f'[{name}]\n{statement}\n{plan}')

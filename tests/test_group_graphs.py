@@ -66,7 +66,19 @@ def test_the_default_group_maps_to_the_default_graph(driver):
 
 def test_a_group_that_cannot_be_a_graph_name_is_refused(driver):
     with pytest.raises(ValueError, match='graph name'):
-        driver.clone('a-b')
+        driver.clone('ab-')
+
+
+async def test_a_group_id_with_a_dash_gets_its_own_graph(driver):
+    """graphiti accepts a dash in a group id, and so does AGE in a graph name."""
+    group = unique_name('grp').replace('_', '-')
+    clone = driver.clone(group)
+    node = EntityNode(name='Alice', group_id=group, labels=['Person'], created_at=NOW)
+    node.name_embedding = axis(0)
+    await node.save(clone)
+
+    assert [n.uuid for n in await EntityNode.get_by_group_ids(clone, [group])] == [node.uuid]
+    assert set(index_names()) <= _graph_indexes(group)
 
 
 async def test_a_group_graph_gets_every_index_once_on_first_use(driver):

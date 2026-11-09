@@ -1,7 +1,7 @@
 """graphiti's generic query path (seam 2).
 
 What graphiti sends to ``execute_query`` or ``session().run`` outside the two
-interfaces runs as it is. Two rules guard that path:
+interfaces runs as portable Cypher. Two rules guard that path:
 
 * A FalkorDB or Neo4j function is refused before any connection: such a query
   comes from a provider branch of graphiti that leaked past the interfaces.

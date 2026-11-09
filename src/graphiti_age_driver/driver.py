@@ -4,9 +4,10 @@ One AGE graph holds one graphiti group, as one FalkorDB graph does today. One
 PostgreSQL database holds all the group graphs, and one connection pool serves
 the base driver and all its clones.
 
-The driver reports ``GraphProvider.FALKORDB``. graphiti-core's provider list is
-closed, and this value selects what AGE needs: graphiti clones the driver for a
-single group, keeps one graph for each group, and stores timestamps as strings.
+The driver reports ``GraphProvider.FALKORDB``, because graphiti-core's provider
+list is closed. This value selects what AGE needs. graphiti clones the driver
+for a single group, keeps one graph for each group, and stores timestamps as
+strings.
 graphiti's FalkorDB Cypher must never run, so the driver sets both of graphiti's
 interface objects and implements every method (``tests/test_surface.py``).
 
@@ -59,8 +60,8 @@ logger = logging.getLogger(__name__)
 # driver, unless the constructor names another graph.
 DEFAULT_GRAPH = 'default_db'
 
-# The pool. graphiti runs the writes of one episode concurrently, and the shared
-# PostgreSQL app also serves paperclip and cognee, so the pool stays small.
+# The pool stays small. graphiti runs the writes of one episode concurrently,
+# and the shared PostgreSQL app also serves paperclip and cognee.
 POOL_MIN_SIZE = 1
 POOL_MAX_SIZE = 8
 _POOL_OPEN_TIMEOUT = 15.0
@@ -90,30 +91,47 @@ def _normalize(query: str) -> str:
 
 # The reviewed generic queries, by the function that sends each one outside the
 # two interfaces: graphiti-core 0.31.2, and the MCP server at the homelab ref
-# 16bf5143. Each one is portable Cypher. ``tests/test_generic_path.py`` runs
-# each one on AGE and checks that graphiti-core still holds the text.
+# 16bf5143. ``tests/test_generic_path.py`` checks that graphiti-core still
+# sends each text, and ``tests/test_plans.py`` checks the plan of each one.
 #
 # 📌 homelab#332 names only the saga lookup. graphiti-core 0.31.2 has a second
 # one: remove_episode, the MCP delete_episode tool.
 REVIEWED_QUERIES: dict[str, str] = {
-    # add_episode with a saga. The pattern map is served by the GIN index on the
-    # saga properties.
+    # add_episode with a saga.
     'graphiti_core.graphiti.Graphiti._get_or_create_saga': """
             MATCH (s:Saga {name: $name, group_id: $group_id})
             RETURN s.uuid AS uuid, s.name AS name, s.group_id AS group_id,
                    s.created_at AS created_at, s.first_episode_uuid AS first_episode_uuid,
                    s.last_episode_uuid AS last_episode_uuid
             """,
-    # One count for each entity that the episode mentions. 📌 The pattern map on
-    # Entity reads the whole label: no index serves `properties @> {...}` on a
-    # label that holds embeddings. A group graph is small and TTL-bounded.
+    # One count for each entity that the episode mentions.
     'graphiti_core.graphiti.Graphiti.remove_episode': (
         'MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) RETURN count(*) AS episode_count'
     ),
-    # The get_status tool, through session().run().
+    # The get_status tool, through session().run(). It counts the whole graph.
     'mcp_server.graphiti_mcp_server.get_status': 'MATCH (n) RETURN count(n) as count',
 }
 GENERIC_QUERIES: frozenset[str] = frozenset(_normalize(q) for q in REVIEWED_QUERIES.values())
+
+# The AGE form of each reviewed text with a pattern map. AGE compiles a pattern
+# map to `properties @> {...}`, which no btree index serves, so the text reads
+# the whole label. Each AGE form returns the same rows through a WHERE lookup.
+_AGE_FORMS: dict[str, str] = {
+    'graphiti_core.graphiti.Graphiti._get_or_create_saga': """
+            MATCH (s:Saga) WHERE s.name = $name AND s.group_id = $group_id
+            RETURN s.uuid AS uuid, s.name AS name, s.group_id AS group_id,
+                   s.created_at AS created_at, s.first_episode_uuid AS first_episode_uuid,
+                   s.last_episode_uuid AS last_episode_uuid
+            """,
+    'graphiti_core.graphiti.Graphiti.remove_episode': """
+            MATCH (n:Entity) WHERE n.uuid = $uuid
+            MATCH (e:Episodic)-[:MENTIONS]->(n)
+            RETURN count(*) AS episode_count
+            """,
+}
+_REWRITES: dict[str, str] = {
+    _normalize(REVIEWED_QUERIES[name]): form for name, form in _AGE_FORMS.items()
+}
 
 
 class UnsupportedQueryError(ValueError):
@@ -177,8 +195,21 @@ class _Store:
         self.embedding_dims_strict = embedding_dims_strict
         self.strict = strict
         self.generic_queries = GENERIC_QUERIES | {_normalize(q) for q in extra_generic_queries}
-        self.pool = AsyncConnectionPool(
-            conninfo,
+        self.pool = self._new_pool()
+        self.pool_lock = asyncio.Lock()
+        self.pool_open = False
+        self.ready_graphs: set[str] = set()
+        self.graph_locks: dict[str, asyncio.Lock] = {}
+        self.warned_queries: set[str] = set()
+        # Called with (sql, args, kind) for each statement; kind is "own" or
+        # "generic". The plan tests read the statements through it.
+        self.statement_hooks: list[StatementHook] = []
+
+    def _new_pool(self) -> AsyncConnectionPool:
+        """A pool that is not open yet. 🚨 psycopg_pool cannot open a pool again
+        after a close, so each close puts a new pool in its place."""
+        return AsyncConnectionPool(
+            self.conninfo,
             min_size=POOL_MIN_SIZE,
             max_size=POOL_MAX_SIZE,
             open=False,
@@ -188,14 +219,6 @@ class _Store:
             check=AsyncConnectionPool.check_connection,
             name='graphiti-age',
         )
-        self.pool_lock = asyncio.Lock()
-        self.pool_open = False
-        self.ready_graphs: set[str] = set()
-        self.graph_locks: dict[str, asyncio.Lock] = {}
-        self.warned_queries: set[str] = set()
-        # Called with (sql, args, kind) for each statement; kind is "own" or
-        # "generic". The plan tests read the statements through it.
-        self.statement_hooks: list[StatementHook] = []
 
     async def open(self) -> None:
         if self.pool_open:
@@ -206,7 +229,10 @@ class _Store:
             try:
                 await self.pool.open(wait=True, timeout=_POOL_OPEN_TIMEOUT)
             except PoolTimeout:
+                # The server can be down only for a restart: the next call
+                # tries again with a new pool.
                 await self.pool.close()
+                self.pool = self._new_pool()
                 # The pool says only "initialization incomplete". One direct
                 # connection raises the real cause: a wrong host, password or
                 # database, or a role without the AGE preload.
@@ -216,9 +242,12 @@ class _Store:
             self.pool_open = True
 
     async def close(self) -> None:
-        await self.pool.close()
-        self.pool_open = False
-        self.ready_graphs.clear()
+        """Close the pool. The next call opens a new pool."""
+        async with self.pool_lock:
+            await self.pool.close()
+            self.pool = self._new_pool()
+            self.pool_open = False
+            self.ready_graphs.clear()
 
     def graph_lock(self, graph: str) -> asyncio.Lock:
         return self.graph_locks.setdefault(graph, asyncio.Lock())
@@ -479,7 +508,7 @@ class AGEDriver(GraphDriver):
     async def _sql(
         self, sql: str, args: SqlArgs = (), *, tx: AGEDriverSession | None = None
     ) -> list[tuple[Any, ...]]:
-        """Run one SQL statement; its rows."""
+        """Run one SQL statement and return its rows."""
         if tx is not None and tx.connection is not None:
             async with tx.connection.cursor() as cursor:
                 await self._execute(cursor, sql, args)
@@ -519,7 +548,7 @@ class AGEDriver(GraphDriver):
         tx: AGEDriverSession | None = None,
         retry: bool = False,
     ) -> list[list[dict[str, Any]]]:
-        """Run Cypher statements in one transaction; the rows of each.
+        """Run Cypher statements in one transaction and return the rows of each.
 
         In a session's ``execute_write`` they run on its transaction, and that
         transaction runs again if it loses a race. Otherwise, with ``retry``,
@@ -596,6 +625,7 @@ class AGEDriver(GraphDriver):
         self, query: str, params: dict[str, Any], session: AGEDriverSession | None = None
     ) -> tuple[list[dict[str, Any]], list[str]]:
         self._check_generic(query)
+        query = _REWRITES.get(_normalize(query), query)
         params = {k: v for k, v in params.items() if k not in ('routing_', 'database_')}
         await self._ready()
         if session is not None and session.connection is not None:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import sys
+from pathlib import Path
 
 EXPECTED = 13
 CONDITION = 'if graph_driver.provider == GraphProvider.FALKORDB:'
@@ -27,7 +28,7 @@ LIFTED = 'if False:  # AGE: lifted by ci/lift-falkordb-skips.py'
 
 
 def main(path: str) -> None:
-    lines = open(path).read().split('\n')
+    lines = Path(path).read_text().split('\n')
     lifted = 0
     for index, line in enumerate(lines[:-1]):
         if line.strip() == CONDITION and SKIP.fullmatch(lines[index + 1].strip()):
@@ -35,7 +36,7 @@ def main(path: str) -> None:
             lifted += 1
     if lifted != EXPECTED:
         sys.exit(f'{path}: lifted {lifted} FalkorDB skips, expected {EXPECTED}')
-    open(path, 'w').write('\n'.join(lines))
+    Path(path).write_text('\n'.join(lines))
     print(f'{path}: lifted {lifted} FalkorDB skips')
 
 

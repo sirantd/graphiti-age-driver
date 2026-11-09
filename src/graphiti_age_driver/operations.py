@@ -375,7 +375,7 @@ async def vertices_by_group_ids(
     limit: int | None,
     uuid_cursor: str | None,
 ) -> list[dict[str, Any]]:
-    """The vertices of the groups, newest uuid first, as graphiti pages them."""
+    """Return the vertices of the groups, newest uuid first, as graphiti pages them."""
     if not group_ids:
         return []
     cursor = 'AND n.uuid < $uuid' if uuid_cursor else ''
@@ -752,7 +752,7 @@ class AGEGraphOperations(GraphOperationsInterface):
         source: Any | None = None,
         saga: str | None = None,
     ) -> list[Any]:
-        """The ``last_n`` newest episodes at ``reference_time``, oldest first."""
+        """Return the ``last_n`` newest episodes at ``reference_time``, oldest first."""
         age = _age(driver)
         source_filter = 'AND e.source = $source' if source is not None else ''
         params: dict[str, Any] = {

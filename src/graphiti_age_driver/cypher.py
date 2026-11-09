@@ -26,9 +26,11 @@ import re
 AGTYPE = 'ag_catalog.agtype'
 DOLLAR_TAG = '$cypher$'
 
-# AGE refuses a graph name shorter than 3 characters. The name goes into the
-# SQL text, so anything other than a plain identifier is refused here.
-_GRAPH_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]{2,62}')
+# AGE 1.8.0's rule for a graph name (measured on 2026-11-09): 3 to 63
+# characters, a letter or "_" first, then letters, digits, "_", "." or "-", and
+# no "." or "-" last. The name goes into the SQL text as a quoted identifier and
+# a string literal, and this rule admits no quote.
+_GRAPH_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_.\-]{1,61}[A-Za-z0-9_]')
 
 _WORD = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 _OPEN = '([{'
@@ -39,8 +41,8 @@ def validate_graph_name(name: str) -> str:
     """Return ``name``, or raise ValueError if it cannot be an AGE graph name."""
     if not isinstance(name, str) or not _GRAPH_NAME.fullmatch(name):
         raise ValueError(
-            f'invalid AGE graph name {name!r}: the graph name must be an identifier '
-            'of 3 to 63 letters, digits or underscores that does not start with a digit'
+            f'invalid AGE graph name {name!r}: the graph name must have 3 to 63 letters, '
+            'digits, "_", "." or "-", start with a letter or "_", and not end with "." or "-"'
         )
     return name
 

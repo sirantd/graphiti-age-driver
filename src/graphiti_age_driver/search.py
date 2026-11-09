@@ -35,7 +35,7 @@ from graphiti_core.utils.datetime_utils import convert_datetimes_to_strings
 
 from . import agtype, records
 from .driver import AGEDriver
-from .operations import _age
+from .operations import _age, _load_embeddings
 from .schema import (
     COMMUNITY,
     ENTITY,
@@ -54,9 +54,9 @@ from .schema import (
 
 _STOPWORDS = frozenset(STOPWORDS)
 
-# pgvector: keep scanning the HNSW graph until the LIMIT is met after the
-# filters, in exact distance order. Without it an HNSW scan returns at most
-# hnsw.ef_search rows before the filters run.
+# pgvector: with this setting, an HNSW scan continues in exact distance order
+# until the filtered rows meet the LIMIT. Without it, an HNSW scan returns at
+# most hnsw.ef_search rows before the filters run.
 _VECTOR_SETTINGS = {'hnsw.iterative_scan': 'strict_order'}
 
 
@@ -338,9 +338,9 @@ class AGESearchInterface(SearchInterface):
         limit: int = 100,
         min_score: float = 0.7,
     ) -> list[Any]:
-        """📌 graphiti applies the source and target arguments only together
-        with ``group_ids`` (an indentation of its code). Here each applies when
-        it is given."""
+        """📌 graphiti's fallback applies the source and target arguments only
+        inside its ``group_ids`` branch. Here each argument applies when it is
+        given."""
         age = _age(driver)
         sql_filter = edge_filter(search_filter)
         if group_ids is not None:
@@ -425,8 +425,6 @@ class AGESearchInterface(SearchInterface):
         driver: Any,
         communities: list[Any],
     ) -> dict[str, list[float]]:
-        from .operations import _load_embeddings
-
         uuids = [community.uuid for community in communities]
         return await _load_embeddings(_age(driver), COMMUNITY, 'name_embedding', uuids)
 

@@ -13,9 +13,10 @@ get WAL, MVCC, `statement_timeout`, `pg_dump` and disk-resident storage.
 **Stage B of homelab#332: not deployed.** The CI gate runs against the
 production store:
 
-* graphiti-core's own suite must pass 31 of its 34 tests (one test runs twice),
-  with graphiti's driver fixture shadowed by this driver. Four tests are
-  deselected by name (see [The graphiti suite](#the-graphiti-suite)).
+* graphiti-core's own suite must pass all 31 selected tests, with graphiti's
+  driver fixture shadowed by this driver. The three suite files have 35 test
+  runs (one test is parametrized twice), and four of them are deselected by
+  name (see [The graphiti suite](#the-graphiti-suite)).
 * Every statement that the driver emits must read its label tables through an
   index (see [The plan gate](#the-plan-gate)).
 
@@ -52,6 +53,10 @@ indexes, and raises an error if it cannot. A group graph is created in the same
 way on its first statement. If that creation fails, the statement fails, and
 the next statement tries again. So the driver never runs on an unindexed graph.
 
+If the server is down when the driver opens its pool, the call fails, and the
+next call opens a new pool. After `close()`, the next call also opens a new
+pool.
+
 ### What the server must have
 
 1. AGE 1.8.0 available to the cluster. In production the files come from a
@@ -84,9 +89,10 @@ the next statement tries again. So the driver never runs on an unindexed graph.
 * Timestamps are UTC ISO strings, as in the FalkorDB driver. A null value is an
   absent property, as on FalkorDB.
 
-🚨 A group id must be a valid AGE graph name: 3 to 63 letters, digits or
-underscores, and no digit first. `clone('a-b')` raises `ValueError`. Check
-every live group id before a migration.
+🚨 A group id must be a valid AGE graph name: 3 to 63 letters, digits, `_`,
+`.` or `-`, with a letter or `_` first and no `.` or `-` last. `clone('ab-')`
+raises `ValueError`. graphiti accepts more: check every live group id before a
+migration.
 
 ### Indexes
 
@@ -98,15 +104,13 @@ Each graph gets these indexes when it is created:
 | `Entity` | btree on `name`; GIN on `labels`; GIN full text on `name`, `summary`; HNSW on `name_embedding` |
 | `Episodic` | btree on `valid_at`; GIN full text on `content`, `source`, `source_description` |
 | `Community` | GIN full text on `name`; HNSW on `name_embedding` |
-| `Saga` | btree on `name`; GIN on all properties |
+| `Saga` | btree on `name` |
 | `RELATES_TO` | btree on `name`; GIN full text on `name`, `fact`; HNSW on `fact_embedding` |
 
 AGE makes the `id`, `start_id` and `end_id` indexes itself.
 
 * The `(group_id, uuid)` index serves graphiti's pages of a group, newest uuid
   first. It also serves every lookup by `group_id`.
-* The `Saga` GIN index serves graphiti's saga lookup, which uses a pattern map
-  (see [The generic query path](#the-generic-query-path)).
 * An HNSW index is partial on its dimension: `vector(N)` where
   `vector_dims(...) = N`. A row of another dimension is not in the index, and
   no search finds it. For this reason `embedding_dims_strict` refuses that
@@ -164,6 +168,9 @@ Cypher, with one result column for each item of the last `RETURN`.
   mention count of `remove_episode` in graphiti-core, and the node count of the
   MCP server's `get_status`. If `strict` is set, an unknown text is refused.
   Otherwise it runs, with one warning for each distinct text.
+* The saga lookup and the mention count use a pattern map. AGE compiles it to
+  `properties @> {...}`, which no btree index serves. So the driver runs each
+  of these texts in an equivalent `WHERE` form.
 * `tests/test_generic_path.py` reads each reviewed graphiti text from
   graphiti-core's source. A graphiti bump that changes a text fails CI.
 
@@ -199,6 +206,9 @@ table must carry an `Index Cond`, a `Recheck Cond` or an `Order By`.
 * A census fails when an interface method is missing from the workload.
 * Three calls delete or read a whole graph by design, and they are listed by
   name.
+* graphiti's reviewed texts on the generic path get the same check, with the
+  parameters that graphiti sends. The `get_status` count reads the whole graph
+  by design.
 * An unlabeled pattern also reads AGE's default-label tables. Every statement
   of the driver writes a labeled row, so the test asserts that these tables
   stay empty.

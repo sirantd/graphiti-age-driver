@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from graphiti_age_driver.cypher import compose, return_columns
+from graphiti_age_driver.cypher import compose, return_columns, validate_graph_name
 
 
 @pytest.mark.parametrize(
@@ -83,9 +83,18 @@ def test_compose_refuses_the_dollar_tag_in_the_query():
         compose('g_x', "RETURN '$cypher$' AS a")
 
 
-@pytest.mark.parametrize('name', ['ab', '1abc', 'a-b-c', "x'); DROP TABLE t; --", ''])
+@pytest.mark.parametrize(
+    'name', ['ab', '1abc', 'ab-', 'ab.', '-ab', 'a b', 'x' * 64, "x'); DROP TABLE t; --", '']
+)
 def test_compose_refuses_an_invalid_graph_name(name):
-    """The graph name goes into the SQL text, so it must be a plain identifier.
-    AGE itself refuses names shorter than 3 characters."""
+    """The graph name goes into the SQL text, so it must be a name that AGE
+    accepts and that holds no quote. AGE refuses each of these names."""
     with pytest.raises(ValueError, match='graph name'):
         compose(name, 'RETURN 1 AS a')
+
+
+@pytest.mark.parametrize('name', ['a-b-c', 'a.b_c', 'paperclip-ceo', '_ab', 'x' * 63])
+def test_a_graph_name_that_age_accepts_is_valid(name):
+    """AGE 1.8.0 accepts a dot and a dash inside a graph name (measured on
+    2026-11-09). graphiti accepts a dash in a group id."""
+    assert validate_graph_name(name) == name

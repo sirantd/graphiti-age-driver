@@ -7,9 +7,9 @@ on:
 
 jobs:
   surface:
-    # The cheap gate: the interface census against the pinned graphiti-core,
-    # the generic-path guard, the Cypher composition, the agtype parser, and the
-    # census of graphiti's suite. It needs no server, so it selects
+    # The cheap gate. It runs the interface census against the pinned
+    # graphiti-core, the generic-path guard, the Cypher composition, the agtype
+    # parser, and the census of graphiti's suite. It needs no server, so it selects
     # "not integration" and not a file list, which would stop covering the next
     # server-free module. The suite census reads the fetched suite.
     runs-on: ubuntu-latest
