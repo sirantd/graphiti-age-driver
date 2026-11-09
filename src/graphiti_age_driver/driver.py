@@ -481,8 +481,9 @@ class AGEDriver(GraphDriver):
         await self._ready()
 
     async def delete_all_indexes(self) -> None:
-        """Drop every index that the driver made on this graph. AGE's own
-        indexes (id, start_id, end_id) stay."""
+        """Drop every index that the driver made on this graph. This includes
+        the id index of each edge label. AGE's own indexes stay: the id index of
+        each vertex label, and the start_id and end_id indexes of each edge label."""
         await self._store.open()
         for name in index_names():
             await self._sql(f'DROP INDEX IF EXISTS "{self._database}"."{name}"')

@@ -101,14 +101,20 @@ Each graph gets these indexes when it is created:
 | label | index |
 |---|---|
 | every label | btree on `uuid` (unique), btree on `(group_id, uuid)` |
+| every edge label | btree on the `id` column |
 | `Entity` | btree on `name`; GIN on `labels`; GIN full text on `name`, `summary`; HNSW on `name_embedding` |
 | `Episodic` | btree on `valid_at`; GIN full text on `content`, `source`, `source_description` |
 | `Community` | GIN full text on `name`; HNSW on `name_embedding` |
 | `Saga` | btree on `name` |
 | `RELATES_TO` | btree on `name`; GIN full text on `name`, `fact`; HNSW on `fact_embedding` |
 
-AGE makes the `id`, `start_id` and `end_id` indexes itself.
+AGE 1.8.0 makes the `id` index of a vertex label, and the `start_id` and
+`end_id` indexes of an edge label. It makes no `id` index for an edge label.
 
+* 🚨 The `id` index of an edge label is the driver's. AGE's `SET` and `DELETE`
+  find the row to change through a btree index on `id`, else they scan the
+  whole label table (`src/backend/executor/cypher_set.c`). The plan gate cannot
+  see that scan, so `tests/test_group_graphs.py` checks the catalog.
 * The `(group_id, uuid)` index serves graphiti's pages of a group, newest uuid
   first. It also serves every lookup by `group_id`.
 * An HNSW index is partial on its dimension: `vector(N)` where
