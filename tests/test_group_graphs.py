@@ -20,7 +20,7 @@ from graphiti_core.nodes import EntityNode, EpisodeType, EpisodicNode
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 
 from graphiti_age_driver import AGEDriver
-from graphiti_age_driver.schema import index_names
+from graphiti_age_driver.schema import EDGE_LABELS, VERTEX_LABELS, index_names
 
 pytestmark = pytest.mark.integration
 
@@ -53,6 +53,59 @@ def _graph_indexes(graph: str) -> set[str]:
     with connect() as conn:
         rows = conn.execute('SELECT indexname FROM pg_indexes WHERE schemaname = %s', (graph,))
         return {row[0] for row in rows}
+
+
+# The tables of a graph and, for each one, whether it has an index that AGE's
+# find_usable_btree_index_for_attr(rel, 1) accepts: a valid btree, not partial,
+# on the id column (column 1) only.
+_ID_INDEX_BY_TABLE = """
+SELECT t.tablename,
+       EXISTS (
+           SELECT 1
+             FROM pg_index x
+             JOIN pg_class i ON i.oid = x.indexrelid
+             JOIN pg_am am ON am.oid = i.relam
+            WHERE x.indrelid = c.oid
+              AND x.indkey::text = '1'
+              AND am.amname = 'btree'
+              AND x.indisvalid
+              AND x.indpred IS NULL
+       )
+  FROM pg_tables t
+  JOIN pg_namespace n ON n.nspname = t.schemaname
+  JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = t.tablename
+ WHERE t.schemaname = %s
+"""
+
+
+def _tables_without_id_index(graph: str) -> set[str]:
+    with connect() as conn:
+        rows = conn.execute(_ID_INDEX_BY_TABLE, (graph,)).fetchall()
+    assert {row[0] for row in rows} >= {*VERTEX_LABELS, *EDGE_LABELS}
+    return {table for table, indexed in rows if not indexed}
+
+
+async def test_every_label_table_has_a_btree_index_on_id(driver):
+    """AGE's SET and DELETE find the row to change through a btree index on the
+    id column (cypher_set.c and cypher_delete.c of AGE 1.8.0). Without it, each
+    write scans the whole label table.
+
+    🚨 AGE 1.8.0 makes this index for a vertex label only, so the driver makes
+    it for each edge label. The plan gate cannot see the scan: it occurs inside
+    the executor node "Custom Scan (Cypher Set)", not in the plan.
+    """
+    group = unique_name('grp')
+    clone = driver.clone(group)
+    await clone.build_indices_and_constraints()
+
+    assert _tables_without_id_index(group) == set()
+
+    # The index is the driver's own: delete_all_indexes drops it, and
+    # build_indices_and_constraints makes it again on the existing graph.
+    await clone.delete_all_indexes()
+    assert _tables_without_id_index(group) == set(EDGE_LABELS)
+    await clone.build_indices_and_constraints()
+    assert _tables_without_id_index(group) == set()
 
 
 def test_the_default_group_maps_to_the_default_graph(driver):

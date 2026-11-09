@@ -85,6 +85,18 @@ BTREE_INDEXES: tuple[tuple[str, tuple[str, ...], bool], ...] = (
     + _EXTRA_BTREE
 )
 
+# 🚨 A btree on the id COLUMN of each edge label. AGE's SET and DELETE find the
+# row to change through a btree index on id, else they scan the whole label
+# table: find_usable_btree_index_for_attr(rel, 1) in cypher_set.c and
+# cypher_delete.c of AGE 1.8.0. AGE makes that index (the primary key) for a
+# vertex label only. An edge label gets start_id and end_id indexes, and
+# PostgreSQL inheritance does not copy the primary key of _ag_label_edge.
+# On 2026-11-09, one edge SET took 67 ms and read approximately 16,000 buffers
+# with 150k edges (cognee's graph, same AGE). With the index, it took 0.4 ms.
+# The plan gate cannot see this scan: it occurs inside the executor node
+# "Custom Scan (Cypher Set)", not in the plan.
+ID_COLUMN = 'id'
+
 # The default embedding dimension: bge-m3 in the homelab (graphiti_embedding_dimensions).
 DEFAULT_EMBEDDING_DIM = 1024
 
@@ -143,7 +155,8 @@ def index_statements(graph: str, embedding_dim: int) -> list[str]:
 
     🚨 NOTHING ELSE CREATES THESE, AND THE FAILURE IS SILENT: without them each
     lookup reads the whole label. ``tests/test_plans.py`` checks the plan of
-    every statement that the driver sends.
+    every statement that the driver sends. ``tests/test_group_graphs.py``
+    checks the id index of each label table, which no plan shows.
 
     ⚠ An HNSW index needs a fixed dimension. Each one is PARTIAL on
     ``embedding_dim``: an embedding of another dimension is stored but not
@@ -151,6 +164,13 @@ def index_statements(graph: str, embedding_dim: int) -> list[str]:
     unless it is told otherwise (``AGEDriver(embedding_dims_strict=...)``).
     """
     statements = []
+    # A column index, not an expression index: AGE uses only a btree whose
+    # first key is column 1 and that has no predicate.
+    for label in EDGE_LABELS:
+        statements.append(
+            f'CREATE INDEX IF NOT EXISTS "{index_name(label, "btree", ID_COLUMN)}" '
+            f'ON {table(graph, label)} USING btree ({ID_COLUMN})'
+        )
     for label, props, unique in BTREE_INDEXES:
         statements.append(
             f'CREATE {"UNIQUE " if unique else ""}INDEX IF NOT EXISTS '
@@ -179,6 +199,8 @@ def index_statements(graph: str, embedding_dim: int) -> list[str]:
 
 def index_names() -> Iterable[str]:
     """The names of every index that :func:`index_statements` creates."""
+    for label in EDGE_LABELS:
+        yield index_name(label, 'btree', ID_COLUMN)
     for label, props, _ in BTREE_INDEXES:
         yield index_name(label, 'btree', '_'.join(props))
     for label in FULLTEXT_PROPERTIES:
