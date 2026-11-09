@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graphiti-age-driver"
+version = "0.1.0"
+description = "An Apache AGE graph driver for graphiti-core"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+  # psycopg 3 binds the one agtype parameter map of cypher() as a server-side
+  # parameter ($1). AGE requires the third argument of cypher() to be a
+  # parameter, so the client-side binding of psycopg 2 cannot work here.
+  "psycopg[binary]>=3.2,<4",
+  "psycopg-pool>=3.2,<4",
+]
+
+[project.optional-dependencies]
+# graphiti-core is a peer, not a runtime dependency: the driver is installed
+# INTO the graphiti MCP image, which already pins it. Pinned exactly for tests,
+# because graphiti-core's own suite is the only drift detector for the two
+# driver interfaces.
+#
+# 📌 0.31.2 is graphiti_core_version in the homelab role truenas-graphiti when
+# Stage B of homelab#332 started (2026-11-09). A bump is out of scope until the
+# cutover is done. ci/pins.env pins the matching test sources.
+test = [
+  "graphiti-core==0.31.2",
+  # As the homelab graphiti image pins it (Dockerfile.j2): openai 3 swapped
+  # httpx for httpx2, and graphiti-core imports httpx without declaring it.
+  "openai>=2.41.0,<3",
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graphiti_age_driver"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+  "integration: needs a live PostgreSQL with Apache AGE (AGE_HOST / AGE_PORT)",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.format]
+quote-style = "single"
