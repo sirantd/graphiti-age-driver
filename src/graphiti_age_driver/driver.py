@@ -88,29 +88,31 @@ def _normalize(query: str) -> str:
     return ' '.join(query.split())
 
 
-# The reviewed generic queries: graphiti-core 0.31.2 and the MCP server at the
-# homelab ref 16bf5143 send these texts outside the two interfaces. Each one is
-# portable Cypher. ``tests/test_generic_path.py`` runs each one on AGE and checks
-# that graphiti-core still holds the text.
-GENERIC_QUERIES: frozenset[str] = frozenset(
-    _normalize(query)
-    for query in (
-        # Graphiti._get_or_create_saga (add_episode with a saga). The pattern map
-        # is served by the GIN index on the saga properties.
-        """
+# The reviewed generic queries, by the function that sends each one outside the
+# two interfaces: graphiti-core 0.31.2, and the MCP server at the homelab ref
+# 16bf5143. Each one is portable Cypher. ``tests/test_generic_path.py`` runs
+# each one on AGE and checks that graphiti-core still holds the text.
+#
+# 📌 homelab#332 names only the saga lookup. graphiti-core 0.31.2 has a second
+# one: remove_episode, the MCP delete_episode tool.
+REVIEWED_QUERIES: dict[str, str] = {
+    # add_episode with a saga. The pattern map is served by the GIN index on the
+    # saga properties.
+    'graphiti_core.graphiti.Graphiti._get_or_create_saga': """
             MATCH (s:Saga {name: $name, group_id: $group_id})
             RETURN s.uuid AS uuid, s.name AS name, s.group_id AS group_id, s.created_at AS created_at,
                    s.first_episode_uuid AS first_episode_uuid, s.last_episode_uuid AS last_episode_uuid
             """,
-        # Graphiti.remove_episode (the MCP delete_episode tool): one count for
-        # each entity that the episode mentions. 📌 The pattern map on Entity is
-        # a scan of the label: no index serves `properties @> {...}` on a label
-        # that holds embeddings. A group graph is small and TTL-bounded.
-        'MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) RETURN count(*) AS episode_count',
-        # The MCP get_status tool, through session().run().
-        'MATCH (n) RETURN count(n) as count',
-    )
-)
+    # One count for each entity that the episode mentions. 📌 The pattern map on
+    # Entity reads the whole label: no index serves `properties @> {...}` on a
+    # label that holds embeddings. A group graph is small and TTL-bounded.
+    'graphiti_core.graphiti.Graphiti.remove_episode': (
+        'MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) RETURN count(*) AS episode_count'
+    ),
+    # The get_status tool, through session().run().
+    'mcp_server.graphiti_mcp_server.get_status': 'MATCH (n) RETURN count(n) as count',
+}
+GENERIC_QUERIES: frozenset[str] = frozenset(_normalize(q) for q in REVIEWED_QUERIES.values())
 
 
 class UnsupportedQueryError(ValueError):
