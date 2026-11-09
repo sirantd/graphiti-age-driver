@@ -64,7 +64,8 @@ pool.
    (`ci/init-cluster.sql`).
 2. A graph database with the `age` and `vector` extensions, and a graph role
    that is **not** a superuser. The role's own settings hold the AGE preload,
-   the search path and a `statement_timeout` (`ci/init-graph-db.sql`). The
+   the search path, a `statement_timeout` and an
+   `idle_in_transaction_session_timeout` (`ci/init-graph-db.sql`). The
    search path is load-bearing: AGE's own label DDL fails without `ag_catalog`
    in it.
 
