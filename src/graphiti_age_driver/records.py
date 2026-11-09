@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from graphiti_core.driver.driver import GraphProvider
 from graphiti_core.edges import (
     CommunityEdge,
     EntityEdge,
@@ -23,7 +24,6 @@ from graphiti_core.edges import (
     get_has_episode_edge_from_record,
     get_next_episode_edge_from_record,
 )
-from graphiti_core.driver.driver import GraphProvider
 from graphiti_core.nodes import (
     CommunityNode,
     EntityNode,

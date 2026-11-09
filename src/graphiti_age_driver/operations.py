@@ -191,11 +191,16 @@ def _entity_edge_row(edge: EntityEdge | dict[str, Any]) -> dict[str, Any]:
     data = edge if isinstance(edge, dict) else edge.model_dump()
     props = {field: data.get(field) for field in _ENTITY_EDGE_FIELDS}
     attributes = data.get('attributes') if not isinstance(edge, dict) else None
-    extra = attributes if attributes is not None else {
-        key: value
-        for key, value in data.items()
-        if key not in props and key not in ('source_node_uuid', 'target_node_uuid', 'attributes')
-    }
+    extra = (
+        attributes
+        if attributes is not None
+        else {
+            key: value
+            for key, value in data.items()
+            if key not in props
+            and key not in ('source_node_uuid', 'target_node_uuid', 'attributes')
+        }
+    )
     for key, value in (extra or {}).items():
         props.setdefault(key, value)
     return {
@@ -213,7 +218,11 @@ def _plain_edge_row(edge: Any) -> dict[str, Any]:
         'source': data['source_node_uuid'],
         'target': data['target_node_uuid'],
         'props': _without_nulls(
-            {'uuid': data['uuid'], 'group_id': data.get('group_id'), 'created_at': data.get('created_at')}
+            {
+                'uuid': data['uuid'],
+                'group_id': data.get('group_id'),
+                'created_at': data.get('created_at'),
+            }
         ),
     }
 
@@ -327,7 +336,25 @@ async def upsert_edges(
     await driver._write(statements, tx=tx)
 
 
-async def vertices_by_uuids(driver: AGEDriver, label: str, uuids: list[str]) -> list[dict[str, Any]]:
+def _group_match(alias: str, group_ids: list[str]) -> tuple[str, dict[str, Any]]:
+    """``MATCH {pattern} WHERE <alias>.group_id ...`` for one or more groups.
+
+    graphiti pages one group at a time. For one group the condition is a plain
+    equality, so the (group_id, uuid) index serves the condition and the uuid
+    order together; more groups need an ``UNWIND``.
+    """
+    unique = list(dict.fromkeys(group_ids))
+    if len(unique) == 1:
+        return f'MATCH {{pattern}} WHERE {alias}.group_id = $group_id', {'group_id': unique[0]}
+    return (
+        f'UNWIND $group_ids AS wanted MATCH {{pattern}} WHERE {alias}.group_id = wanted',
+        {'group_ids': unique},
+    )
+
+
+async def vertices_by_uuids(
+    driver: AGEDriver, label: str, uuids: list[str]
+) -> list[dict[str, Any]]:
     if not uuids:
         return []
     rows = await driver._read(
@@ -353,15 +380,15 @@ async def vertices_by_group_ids(
         return []
     cursor = 'AND n.uuid < $uuid' if uuid_cursor else ''
     limit_clause = 'LIMIT $limit' if limit is not None else ''
+    match, params = _group_match('n', group_ids)
     rows = await driver._read(
         f"""
-        UNWIND $group_ids AS wanted
-        MATCH (n:{label}) WHERE n.group_id = wanted {cursor}
+        {match.format(pattern=f'(n:{label})')} {cursor}
         RETURN properties(n) AS props
         ORDER BY n.uuid DESC
         {limit_clause}
         """,
-        {'group_ids': list(dict.fromkeys(group_ids)), 'uuid': uuid_cursor, 'limit': limit},
+        {**params, 'uuid': uuid_cursor, 'limit': limit},
     )
     return [row['props'] for row in rows]
 
@@ -436,15 +463,15 @@ async def edges_by_group_ids(
         return []
     cursor = 'AND e.uuid < $uuid' if uuid_cursor else ''
     limit_clause = 'LIMIT $limit' if limit is not None else ''
+    match, params = _group_match('e', group_ids)
     rows = await driver._read(
         f"""
-        UNWIND $group_ids AS wanted
-        MATCH {_edge_match(label)} WHERE e.group_id = wanted {cursor}
+        {match.format(pattern=_edge_match(label))} {cursor}
         RETURN properties(e) AS props, n.uuid AS source, m.uuid AS target
         ORDER BY e.uuid DESC
         {limit_clause}
         """,
-        {'group_ids': list(dict.fromkeys(group_ids)), 'uuid': uuid_cursor, 'limit': limit},
+        {**params, 'uuid': uuid_cursor, 'limit': limit},
     )
     return [_EDGE_RECORD[label](row['props'], row['source'], row['target']) for row in rows]
 
@@ -553,7 +580,9 @@ class AGEGraphOperations(GraphOperationsInterface):
         uuids: list[str],
         group_id: str | None = None,
     ) -> list[Any]:
-        nodes = [records.entity_node(p) for p in await vertices_by_uuids(_age(driver), ENTITY, uuids)]
+        nodes = [
+            records.entity_node(p) for p in await vertices_by_uuids(_age(driver), ENTITY, uuids)
+        ]
         if group_id is not None:
             nodes = [node for node in nodes if node.group_id == group_id]
         return nodes
@@ -696,8 +725,12 @@ class AGEGraphOperations(GraphOperationsInterface):
             raise NodeNotFoundError(uuid)
         return records.episodic_node(props[0])
 
-    async def episodic_node_get_by_uuids(self, _cls: Any, driver: Any, uuids: list[str]) -> list[Any]:
-        return [records.episodic_node(p) for p in await vertices_by_uuids(_age(driver), EPISODIC, uuids)]
+    async def episodic_node_get_by_uuids(
+        self, _cls: Any, driver: Any, uuids: list[str]
+    ) -> list[Any]:
+        return [
+            records.episodic_node(p) for p in await vertices_by_uuids(_age(driver), EPISODIC, uuids)
+        ]
 
     async def episodic_node_get_by_group_ids(
         self,
@@ -800,8 +833,13 @@ class AGEGraphOperations(GraphOperationsInterface):
             raise NodeNotFoundError(uuid)
         return records.community_node(props[0])
 
-    async def community_node_get_by_uuids(self, _cls: Any, driver: Any, uuids: list[str]) -> list[Any]:
-        return [records.community_node(p) for p in await vertices_by_uuids(_age(driver), COMMUNITY, uuids)]
+    async def community_node_get_by_uuids(
+        self, _cls: Any, driver: Any, uuids: list[str]
+    ) -> list[Any]:
+        return [
+            records.community_node(p)
+            for p in await vertices_by_uuids(_age(driver), COMMUNITY, uuids)
+        ]
 
     async def community_node_get_by_group_ids(
         self,
@@ -1007,7 +1045,9 @@ class AGEGraphOperations(GraphOperationsInterface):
     async def episodic_edge_get_by_uuid(self, _cls: Any, driver: Any, uuid: str) -> Any:
         return await _one_edge(_age(driver), MENTIONS, uuid)
 
-    async def episodic_edge_get_by_uuids(self, _cls: Any, driver: Any, uuids: list[str]) -> list[Any]:
+    async def episodic_edge_get_by_uuids(
+        self, _cls: Any, driver: Any, uuids: list[str]
+    ) -> list[Any]:
         edges = await edges_by_uuids(_age(driver), MENTIONS, uuids)
         if not edges:
             raise EdgeNotFoundError(uuids[0] if uuids else '')
@@ -1048,7 +1088,9 @@ class AGEGraphOperations(GraphOperationsInterface):
     async def community_edge_get_by_uuid(self, _cls: Any, driver: Any, uuid: str) -> Any:
         return await _one_edge(_age(driver), HAS_MEMBER, uuid)
 
-    async def community_edge_get_by_uuids(self, _cls: Any, driver: Any, uuids: list[str]) -> list[Any]:
+    async def community_edge_get_by_uuids(
+        self, _cls: Any, driver: Any, uuids: list[str]
+    ) -> list[Any]:
         return await edges_by_uuids(_age(driver), HAS_MEMBER, uuids)
 
     async def community_edge_get_by_group_ids(
@@ -1094,7 +1136,9 @@ class AGEGraphOperations(GraphOperationsInterface):
     async def has_episode_edge_get_by_uuid(self, _cls: Any, driver: Any, uuid: str) -> Any:
         return await _one_edge(_age(driver), HAS_EPISODE, uuid)
 
-    async def has_episode_edge_get_by_uuids(self, _cls: Any, driver: Any, uuids: list[str]) -> list[Any]:
+    async def has_episode_edge_get_by_uuids(
+        self, _cls: Any, driver: Any, uuids: list[str]
+    ) -> list[Any]:
         return await edges_by_uuids(_age(driver), HAS_EPISODE, uuids)
 
     async def has_episode_edge_get_by_group_ids(
@@ -1140,7 +1184,9 @@ class AGEGraphOperations(GraphOperationsInterface):
     async def next_episode_edge_get_by_uuid(self, _cls: Any, driver: Any, uuid: str) -> Any:
         return await _one_edge(_age(driver), NEXT_EPISODE, uuid)
 
-    async def next_episode_edge_get_by_uuids(self, _cls: Any, driver: Any, uuids: list[str]) -> list[Any]:
+    async def next_episode_edge_get_by_uuids(
+        self, _cls: Any, driver: Any, uuids: list[str]
+    ) -> list[Any]:
         return await edges_by_uuids(_age(driver), NEXT_EPISODE, uuids)
 
     async def next_episode_edge_get_by_group_ids(
@@ -1196,7 +1242,9 @@ class AGEGraphOperations(GraphOperationsInterface):
         """
         age = _age(driver)
         if group_ids is None:
-            await age._write([(f'MATCH (n:{label}) DETACH DELETE n', None) for label in VERTEX_LABELS])
+            await age._write(
+                [(f'MATCH (n:{label}) DETACH DELETE n', None) for label in VERTEX_LABELS]
+            )
             return
         await age._write(
             [
@@ -1212,7 +1260,9 @@ class AGEGraphOperations(GraphOperationsInterface):
             ]
         )
 
-    async def get_community_clusters(self, driver: Any, group_ids: list[str] | None) -> list[list[Any]]:
+    async def get_community_clusters(
+        self, driver: Any, group_ids: list[str] | None
+    ) -> list[list[Any]]:
         """Label propagation over the RELATES_TO projection of each group.
 
         One read for each group gives the edge count between each pair of
@@ -1367,7 +1417,8 @@ class AGEGraphOperations(GraphOperationsInterface):
                 f"""
                 MATCH (x:{ENTITY}) WHERE x.uuid = $node_uuid
                 MATCH {pattern.format(r=RELATES_TO, l=ENTITY)}
-                RETURN properties(e) AS props, startNode(e).uuid AS source, endNode(e).uuid AS target
+                RETURN properties(e) AS props, startNode(e).uuid AS source,
+                       endNode(e).uuid AS target
                 """,
                 {'node_uuid': node_uuid},
             )

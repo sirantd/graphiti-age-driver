@@ -61,7 +61,13 @@ def drop_graph(name: str) -> None:
 def new_driver(graph: str, **settings: Any) -> AGEDriver:
     options: dict[str, Any] = {'embedding_dim': EMBEDDING_DIM, 'strict': True, **settings}
     return AGEDriver(
-        host=HOST, port=PORT, user=USER, password=PASSWORD, dbname=DATABASE, database=graph, **options
+        host=HOST,
+        port=PORT,
+        user=USER,
+        password=PASSWORD,
+        dbname=DATABASE,
+        database=graph,
+        **options,
     )
 
 

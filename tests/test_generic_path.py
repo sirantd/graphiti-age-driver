@@ -15,7 +15,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import Mock
 
 import pytest
@@ -94,7 +94,7 @@ async def test_the_saga_lookup_finds_the_saga_and_does_not_create_a_second(drive
         embedder=Mock(spec=EmbedderClient),
         cross_encoder=Mock(spec=CrossEncoderClient),
     )
-    created_at = datetime(2026, 11, 9, 1, 0, tzinfo=timezone.utc)
+    created_at = datetime(2026, 11, 9, 1, 0, tzinfo=UTC)
 
     first = await graphiti._get_or_create_saga('weekly sync', 'homelab', created_at)
     again = await graphiti._get_or_create_saga('weekly sync', 'homelab', created_at)

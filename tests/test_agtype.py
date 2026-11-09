@@ -27,19 +27,19 @@ EDGE = (
 
 
 @pytest.mark.parametrize(
-    ("text", "value"),
+    ('text', 'value'),
     [
-        ('"a"', "a"),
-        ("2", 2),
-        ("1.5", 1.5),
-        ("true", True),
-        ("null", None),
-        ('[1, "x"]', [1, "x"]),
-        ('{"a": [1, {"b": null}]}', {"a": [1, {"b": None}]}),
-        ("10::numeric", 10),
-        ("1.50::numeric", 1.5),
-        ('"a\\u0001b\x7f"', "a\x01b\x7f"),
-        ("4611686018427387904", 2**62),
+        ('"a"', 'a'),
+        ('2', 2),
+        ('1.5', 1.5),
+        ('true', True),
+        ('null', None),
+        ('[1, "x"]', [1, 'x']),
+        ('{"a": [1, {"b": null}]}', {'a': [1, {'b': None}]}),
+        ('10::numeric', 10),
+        ('1.50::numeric', 1.5),
+        ('"a\\u0001b\x7f"', 'a\x01b\x7f'),
+        ('4611686018427387904', 2**62),
     ],
 )
 def test_scalars_and_containers(text, value):
@@ -51,33 +51,33 @@ def test_sql_null_is_none():
 
 
 def test_a_vertex_becomes_its_properties():
-    assert parse(VERTEX) == {"f": 1.5, "i": 2, "l": [1, "x"], "m": "it's", "id": "a"}
+    assert parse(VERTEX) == {'f': 1.5, 'i': 2, 'l': [1, 'x'], 'm': "it's", 'id': 'a'}
 
 
 def test_an_edge_becomes_its_properties():
-    assert parse(EDGE) == {"relationship_name": "knows"}
+    assert parse(EDGE) == {'relationship_name': 'knows'}
 
 
 def test_a_path_becomes_the_list_of_its_elements():
-    path = f"[{VERTEX}, {EDGE}, {VERTEX}]::path"
-    assert parse(path) == [parse(VERTEX), {"relationship_name": "knows"}, parse(VERTEX)]
+    path = f'[{VERTEX}, {EDGE}, {VERTEX}]::path'
+    assert parse(path) == [parse(VERTEX), {'relationship_name': 'knows'}, parse(VERTEX)]
 
 
 def test_a_vertex_inside_a_map_is_unwrapped():
-    assert parse(f'{{"n": {VERTEX}}}') == {"n": parse(VERTEX)}
+    assert parse(f'{{"n": {VERTEX}}}') == {'n': parse(VERTEX)}
 
 
 def test_a_suffix_inside_a_string_is_text():
     """``::vertex`` in a property value is data, not a type annotation."""
-    assert parse('{"s": "a}::vertex", "t": "1::numeric"}') == {"s": "a}::vertex", "t": "1::numeric"}
+    assert parse('{"s": "a}::vertex", "t": "1::numeric"}') == {'s': 'a}::vertex', 't': '1::numeric'}
 
 
 def test_a_map_with_vertex_keys_stays_a_map():
     """Only the ``::vertex`` annotation makes a vertex, never the key names."""
     value = '{"id": 1, "label": "x", "properties": {"a": 1}}'
-    assert parse(value) == {"id": 1, "label": "x", "properties": {"a": 1}}
+    assert parse(value) == {'id': 1, 'label': 'x', 'properties': {'a': 1}}
 
 
-@pytest.mark.parametrize(("text", "check"), [("NaN", math.isnan), ("Infinity", math.isinf)])
+@pytest.mark.parametrize(('text', 'check'), [('NaN', math.isnan), ('Infinity', math.isinf)])
 def test_non_finite_floats(text, check):
     assert check(parse(text))

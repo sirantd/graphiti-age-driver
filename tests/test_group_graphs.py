@@ -7,10 +7,11 @@ it creates with its labels and indexes on first use, once.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
 
 import pytest
+from conftest import axis, connect, unique_name
 from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.embedder.client import EmbedderClient
 from graphiti_core.graphiti import Graphiti
@@ -18,13 +19,12 @@ from graphiti_core.llm_client import LLMClient
 from graphiti_core.nodes import EntityNode, EpisodeType, EpisodicNode
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 
-from conftest import axis, connect, unique_name
 from graphiti_age_driver import AGEDriver
 from graphiti_age_driver.schema import index_names
 
 pytestmark = pytest.mark.integration
 
-NOW = datetime(2026, 11, 9, 2, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 9, 2, 0, tzinfo=UTC)
 
 
 def _graphiti(driver: AGEDriver) -> Graphiti:
@@ -135,7 +135,9 @@ async def test_clear_data_clears_only_the_drivers_graph(driver):
     await clear_data(driver, [group])
 
     assert await EpisodicNode.get_by_group_ids(driver, [group]) == []
-    assert [e.name for e in await EpisodicNode.get_by_group_ids(clone, [group])] == ['in group graph']
+    assert [e.name for e in await EpisodicNode.get_by_group_ids(clone, [group])] == [
+        'in group graph'
+    ]
 
 
 async def test_an_embedding_of_another_dimension_is_refused(driver):

@@ -43,7 +43,8 @@ def _test_functions(path: pathlib.Path) -> list[ast.AsyncFunctionDef | ast.Funct
     return [
         node
         for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith('test_')
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith('test_')
     ]
 
 
@@ -80,5 +81,7 @@ def test_each_deselected_test_is_a_suite_test():
 def test_the_fetch_lifted_exactly_the_falkordb_skips(fetched):
     text = (fetched / 'tests/test_graphiti_mock.py').read_text()
 
-    assert text.count('if False:  # AGE: lifted by ci/lift-falkordb-skips.py') == census.LIFTED_SKIPS
+    assert (
+        text.count('if False:  # AGE: lifted by ci/lift-falkordb-skips.py') == census.LIFTED_SKIPS
+    )
     assert 'if graph_driver.provider == GraphProvider.FALKORDB:' not in text

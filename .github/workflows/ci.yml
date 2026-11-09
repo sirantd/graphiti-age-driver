@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  surface:
+    # The cheap gate: the interface census against the pinned graphiti-core,
+    # the generic-path guard, the Cypher composition, the agtype parser, and the
+    # census of graphiti's suite. It needs no server, so it selects
+    # "not integration" and not a file list, which would stop covering the next
+    # server-free module. The suite census reads the fetched suite.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # The graphiti MCP image runs python:3.13-slim.
+          python-version: "3.13"
+      - run: pip install -e '.[test]'
+      - run: ci/fetch-graphiti-suite.sh
+      - run: pytest -m "not integration"
+
+  contract:
+    # The real gate: graphiti-core's own suite and the driver's integration
+    # tests, against the PRODUCTION store: the TrueNAS app's image digest
+    # unchanged, run as uid 999 with its PGDATA and command, AGE mounted
+    # read-only from the pinned PGDG package, the two path settings, and a
+    # non-superuser graph role with the AGE preload in its own settings. See
+    # ci/pins.env.
+    #
+    # 📌 Steps, not a `services:` container: a service starts before the
+    # checkout and cannot mount the AGE files.
+    runs-on: ubuntu-latest
+    env:
+      AGE_HOST: 127.0.0.1
+      AGE_PORT: "5432"
+      AGE_USER: graphiti
+      AGE_PASSWORD: graphiti
+      AGE_DATABASE: graphiti
+      # 🚨 A skipped gate is a green gate. Without a server the fixtures skip.
+      # This flag fails the run instead, and it makes suite/conftest.py fail
+      # the suite unless all 31 tests pass.
+      AGE_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e '.[test]'
+      - name: the AGE files of the pinned package, in the production mount layout
+        run: ci/fetch-age.sh "$RUNNER_TEMP/age"
+      - name: the production PostgreSQL image, with AGE mounted read-only
+        run: ci/start-postgres.sh "$RUNNER_TEMP/age"
+      - run: ci/fetch-graphiti-suite.sh
+      - name: graphiti-core suite
+        # Its own step, so a red build says which half broke: graphiti's
+        # suite, or the driver's own tests. Expect "33 passed, 4 deselected"
+        # (31 graphiti tests and the 2 shadow checks).
+        run: >-
+          pytest -m "not integration" -v suite/test_shadow.py
+          suite/tests/test_edge_int.py suite/tests/test_graphiti_mock.py
+          suite/tests/test_node_int.py
+      - name: driver integration tests
+        run: pytest -m integration -v
+      - name: server log
+        if: failure()
+        run: docker logs age

@@ -19,7 +19,7 @@ one index.
 from __future__ import annotations
 
 import json
-from typing import Iterable
+from collections.abc import Iterable
 
 AGTYPE = 'ag_catalog.agtype'
 
@@ -61,22 +61,29 @@ FULLTEXT_PROPERTIES = {
 # (homelab#332 Further Notes).
 TEXT_SEARCH_CONFIG = 'english'
 
-# Btree expression indexes, as (label, property, unique). Every label gets a
-# UNIQUE index on uuid (graphiti finds every object by it, and a concurrent
-# create of one uuid then fails visibly) and an index on group_id.
-_PER_LABEL_BTREE = (('uuid', True), ('group_id', False))
+# Btree expression indexes, as (label, properties, unique). Every label gets:
+# * a UNIQUE index on uuid: graphiti finds every object by it, and a concurrent
+#   create of one uuid then fails visibly;
+# * an index on (group_id, uuid): graphiti pages a group newest uuid first
+#   (`WHERE group_id = $g ORDER BY uuid DESC LIMIT $n`), which is then one
+#   backward range scan. Measured on 2026-11-09: with a group_id index only, the
+#   planner read the whole label backwards through the uuid index and filtered
+#   the group.
+_PER_LABEL_BTREE = ((('uuid',), True), (('group_id', 'uuid'), False))
 _EXTRA_BTREE = (
-    (ENTITY, 'name', False),  # EntityNode.get_by_names
-    (ENTITY, 'created_at', False),
-    (EPISODIC, 'valid_at', False),  # retrieve_episodes: valid_at <= t, newest first
-    (EPISODIC, 'created_at', False),  # saga summaries: created_at > watermark
-    (RELATES_TO, 'name', False),  # the edge-type search filter
+    (ENTITY, ('name',), False),  # EntityNode.get_by_names
+    (EPISODIC, ('valid_at',), False),  # retrieve_episodes: valid_at <= t, newest first
+    (SAGA, ('name',), False),  # retrieve_episodes of a saga: the saga by name
+    (RELATES_TO, ('name',), False),  # the edge-type search filter
 )
-BTREE_INDEXES = tuple(
-    (label, prop, unique)
-    for label in (*VERTEX_LABELS, *EDGE_LABELS)
-    for prop, unique in _PER_LABEL_BTREE
-) + _EXTRA_BTREE
+BTREE_INDEXES: tuple[tuple[str, tuple[str, ...], bool], ...] = (
+    tuple(
+        (label, props, unique)
+        for label in (*VERTEX_LABELS, *EDGE_LABELS)
+        for props, unique in _PER_LABEL_BTREE
+    )
+    + _EXTRA_BTREE
+)
 
 # The default embedding dimension: bge-m3 in the homelab (graphiti_embedding_dimensions).
 DEFAULT_EMBEDDING_DIM = 1024
@@ -144,11 +151,11 @@ def index_statements(graph: str, embedding_dim: int) -> list[str]:
     unless it is told otherwise (``AGEDriver(embedding_dims_strict=...)``).
     """
     statements = []
-    for label, prop_name, unique in BTREE_INDEXES:
+    for label, props, unique in BTREE_INDEXES:
         statements.append(
             f'CREATE {"UNIQUE " if unique else ""}INDEX IF NOT EXISTS '
-            f'"{index_name(label, "btree", prop_name)}" '
-            f'ON {table(graph, label)} ({prop(None, prop_name)})'
+            f'"{index_name(label, "btree", "_".join(props))}" '
+            f'ON {table(graph, label)} ({", ".join(prop(None, name) for name in props)})'
         )
     for label in FULLTEXT_PROPERTIES:
         statements.append(
@@ -179,8 +186,8 @@ def index_statements(graph: str, embedding_dim: int) -> list[str]:
 
 def index_names() -> Iterable[str]:
     """The names of every index that :func:`index_statements` creates."""
-    for label, prop_name, _ in BTREE_INDEXES:
-        yield index_name(label, 'btree', prop_name)
+    for label, props, _ in BTREE_INDEXES:
+        yield index_name(label, 'btree', '_'.join(props))
     for label in FULLTEXT_PROPERTIES:
         yield index_name(label, 'fts')
     for label, prop_name in VECTOR_PROPERTIES:

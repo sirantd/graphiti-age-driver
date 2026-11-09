@@ -23,42 +23,42 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
+from typing import Any
 
 # A string literal is matched first, so an annotation inside a string stays text.
 _ANNOTATION = re.compile(
     r'"(?:[^"\\]|\\.)*"'
-    r"|(?P<entity>\}::(?:vertex|edge))"
-    r"|(?P<path>\]::path)"
-    r"|(?P<number>::(?:numeric|float|integer|int))"
+    r'|(?P<entity>\}::(?:vertex|edge))'
+    r'|(?P<path>\]::path)'
+    r'|(?P<number>::(?:numeric|float|integer|int))'
 )
 
 # The marker key that a vertex or an edge gets during the parse. agtype text
 # cannot hold NUL, so no stored key can be equal to it.
-_MARKER = "\x00agtype"
+_MARKER = '\x00agtype'
 _MARKER_JSON = json.dumps(_MARKER)
 
 
-def _annotate(match: "re.Match[str]") -> str:
-    if match.group("entity"):
-        return f", {_MARKER_JSON}: true}}"
-    if match.group("path"):
-        return "]"
-    if match.group("number"):
-        return ""
+def _annotate(match: re.Match[str]) -> str:
+    if match.group('entity'):
+        return f', {_MARKER_JSON}: true}}'
+    if match.group('path'):
+        return ']'
+    if match.group('number'):
+        return ''
     return match.group(0)
 
 
 def _unwrap(value: dict) -> Any:
     if _MARKER in value:
-        return value.get("properties") or {}
+        return value.get('properties') or {}
     return value
 
 
-def parse(text: Optional[str]) -> Any:
+def parse(text: str | None) -> Any:
     """Return the Python value of one agtype result value. SQL NULL is None."""
     if text is None:
         return None
-    if "::" not in text:
+    if '::' not in text:
         return json.loads(text)
     return json.loads(_ANNOTATION.sub(_annotate, text), object_hook=_unwrap)

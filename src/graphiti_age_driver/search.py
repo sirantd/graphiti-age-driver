@@ -121,10 +121,8 @@ class SqlFilter:
                 if operator in (ComparisonOperator.is_null, ComparisonOperator.is_not_null):
                     ands.append(f'({expression} {operator.value})')
                 else:
-                    value = convert_datetimes_to_strings(date_filter.date)
-                    ands.append(
-                        f'({expression} {operator.value} {self.param(_agtype_text(value))}::ag_catalog.agtype)'
-                    )
+                    value = self.param(_agtype_text(convert_datetimes_to_strings(date_filter.date)))
+                    ands.append(f'({expression} {operator.value} {value}::ag_catalog.agtype)')
             if ands:
                 ors.append('(' + ' AND '.join(ands) + ')')
         if ors:
@@ -201,10 +199,7 @@ def _distance(alias: str, name: str, search_vector: list[float]) -> tuple[str, s
     )
 
 
-_EDGE_ENDS = (
-    'JOIN {entity} AS n ON n.id = e.start_id '
-    'JOIN {entity} AS m ON m.id = e.end_id'
-)
+_EDGE_ENDS = 'JOIN {entity} AS n ON n.id = e.start_id JOIN {entity} AS m ON m.id = e.end_id'
 
 
 def _edge_rows_to_edges(rows: list[tuple[Any, ...]]) -> list[Any]:
@@ -247,7 +242,12 @@ class AGESearchInterface(SearchInterface):
             f'WHERE {document} @@ q{sql_filter.sql()} '
             'ORDER BY score DESC LIMIT %(limit)s'
         )
-        params = {**sql_filter.params, 'config': TEXT_SEARCH_CONFIG, 'tsquery': tsquery, 'limit': limit}
+        params = {
+            **sql_filter.params,
+            'config': TEXT_SEARCH_CONFIG,
+            'tsquery': tsquery,
+            'limit': limit,
+        }
         return _edge_rows_to_edges(await age._rows(sql, params))
 
     async def node_fulltext_search(
@@ -315,7 +315,12 @@ class AGESearchInterface(SearchInterface):
             f'WHERE {document} @@ q{sql_filter.sql()} '
             'ORDER BY score DESC LIMIT %(limit)s'
         )
-        params = {**sql_filter.params, 'config': TEXT_SEARCH_CONFIG, 'tsquery': tsquery, 'limit': limit}
+        params = {
+            **sql_filter.params,
+            'config': TEXT_SEARCH_CONFIG,
+            'tsquery': tsquery,
+            'limit': limit,
+        }
         return await age._rows(sql, params)
 
     # --------------------------
@@ -477,8 +482,7 @@ class AGESearchInterface(SearchInterface):
             sql_filter.any_of(prop('n', 'group_id'), group_ids)
             sql_filter.any_of('w.origin_group', group_ids)
         sql = (
-            self._walk(age, 'max_depth')
-            + f'SELECT DISTINCT ON (n.id) n.properties FROM walk AS w '
+            self._walk(age, 'max_depth') + f'SELECT DISTINCT ON (n.id) n.properties FROM walk AS w '
             f'JOIN {table(age.graph, ENTITY)} AS n ON n.id = w.node_id '
             f'WHERE w.depth >= 1 AND {prop("n", "group_id")} = w.origin_group{sql_filter.sql()} '
             'LIMIT %(limit)s'

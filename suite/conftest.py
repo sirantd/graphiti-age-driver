@@ -19,6 +19,9 @@ AGE driver, and keeps graphiti's ``mock_embedder``.
   list cannot go stale.
 * The driver runs in strict mode: a graphiti query on the generic path that is
   not reviewed fails the test that sends it.
+* 🚨 A skipped gate is a green gate. With ``AGE_REQUIRED`` set (CI), the run
+  fails unless all :data:`EXPECTED_PASSED` suite tests pass and none skips. Run
+  the whole suite when you set it.
 """
 
 from __future__ import annotations
@@ -34,10 +37,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import pytest  # noqa: E402
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data  # noqa: E402
+from suite_census import DESELECTED, EXPECTED_PASSED  # noqa: E402
+from tests.helpers_test import group_id, group_id_2, mock_embedder  # noqa: E402, F401
 
 from graphiti_age_driver import AGEDriver  # noqa: E402
-from suite_census import DESELECTED  # noqa: E402
-from tests.helpers_test import group_id, group_id_2, mock_embedder  # noqa: E402, F401
 
 # The test helpers of graphiti's suite count and print rows with their own Cypher.
 HELPER_QUERIES = (
@@ -77,6 +80,26 @@ def pytest_collection_modifyitems(config, items):
     deselected = [by_id[test] for test in DESELECTED if test in by_id]
     config.hook.pytest_deselected(items=deselected)
     items[:] = [item for item in items if item not in deselected]
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if os.environ.get('AGE_REQUIRED', '').strip().lower() not in {'1', 'true', 'yes'}:
+        return
+    reporter = session.config.pluginmanager.get_plugin('terminalreporter')
+    stats = reporter.stats if reporter else {}
+
+    def suite_tests(outcome: str) -> set[str]:
+        return {report.nodeid for report in stats.get(outcome, []) if '/tests/' in report.nodeid}
+
+    passed, skipped = suite_tests('passed'), suite_tests('skipped')
+    if skipped or len(passed) != EXPECTED_PASSED:
+        if reporter:
+            reporter.write_line(
+                f'AGE gate: {len(passed)} graphiti suite tests passed, {EXPECTED_PASSED} '
+                f'expected; skipped: {sorted(skipped)}',
+                red=True,
+            )
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 def new_driver() -> AGEDriver:

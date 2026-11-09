@@ -100,8 +100,9 @@ REVIEWED_QUERIES: dict[str, str] = {
     # saga properties.
     'graphiti_core.graphiti.Graphiti._get_or_create_saga': """
             MATCH (s:Saga {name: $name, group_id: $group_id})
-            RETURN s.uuid AS uuid, s.name AS name, s.group_id AS group_id, s.created_at AS created_at,
-                   s.first_episode_uuid AS first_episode_uuid, s.last_episode_uuid AS last_episode_uuid
+            RETURN s.uuid AS uuid, s.name AS name, s.group_id AS group_id,
+                   s.created_at AS created_at, s.first_episode_uuid AS first_episode_uuid,
+                   s.last_episode_uuid AS last_episode_uuid
             """,
     # One count for each entity that the episode mentions. 📌 The pattern map on
     # Entity reads the whole label: no index serves `properties @> {...}` on a
@@ -127,7 +128,9 @@ def _lost_a_race(exc: Exception) -> bool:
 
 
 async def _wait_before_retry(attempt: int, exc: Exception) -> None:
-    logger.info('Write lost a race (%s), attempt %d of %d', type(exc).__name__, attempt, WRITE_ATTEMPTS)
+    logger.info(
+        'Write lost a race (%s), attempt %d of %d', type(exc).__name__, attempt, WRITE_ATTEMPTS
+    )
     await asyncio.sleep(0.02 * attempt + random.uniform(0, 0.02))
 
 
@@ -533,9 +536,7 @@ class AGEDriver(GraphDriver):
                 async with self._store.pool.connection() as conn:
                     async with conn.transaction():
                         async with conn.cursor() as cursor:
-                            return [
-                                (await self._cypher_on(cursor, q, p))[0] for q, p in statements
-                            ]
+                            return [(await self._cypher_on(cursor, q, p))[0] for q, p in statements]
             except psycopg.Error as exc:
                 if not retry or attempt >= WRITE_ATTEMPTS or not _lost_a_race(exc):
                     raise
