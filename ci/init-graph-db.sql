@@ -30,6 +30,10 @@ ALTER ROLE :"role" IN DATABASE :"database" SET session_preload_libraries = 'age'
 -- and the driver's SQL names the vector type and its operators without a schema.
 ALTER ROLE :"role" IN DATABASE :"database" SET search_path = ag_catalog, "$user", public;
 -- homelab#332 story 6: one long graph query stops and cannot freeze the store.
--- 5 min is the value of the cognee graph role; Stage C confirms the production
--- value for both roles.
+-- Production has 5 min for both graph roles (Stage C).
 ALTER ROLE :"role" IN DATABASE :"database" SET statement_timeout = '5min';
+-- homelab#332: a dead client cannot keep the locks of its open transaction.
+-- Production has 1 min for both graph roles (2026-11-10). graphiti can call the
+-- embedder inside a transaction (add_nodes_and_edges_bulk_tx), when an embedding
+-- is missing; a call that stops for 1 min ends the session.
+ALTER ROLE :"role" IN DATABASE :"database" SET idle_in_transaction_session_timeout = '1min';

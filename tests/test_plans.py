@@ -17,6 +17,11 @@ The rules for a plan, as in sirantd/cognee-age-adapter:
   therefore (a) no ``Disabled: true`` in the plan, and (b) every scan of a label
   table carries an ``Index Cond`` or a ``Recheck Cond``, or is an index scan for
   an ``ORDER BY`` (the HNSW ``Order By``).
+* 🚨 Every plan uses the statistics of the seed. The seed turns autovacuum off
+  on the label tables of the throwaway graph, then analyzes them. The plan of a
+  statement is read right after its call, before the whole-graph deletes empty
+  the labels. Without these two rules the test failed at random: an autovacuum
+  changed the statistics, and the planner read a label through a whole index.
 
 ``WHOLE_GRAPH`` is the closed list of calls whose job is to read or delete a
 whole label. They are in the workload, so the census sees them, but their
@@ -564,9 +569,14 @@ async def _seed(driver: AGEDriver) -> dict[str, Any]:
                 )
             ]
         )
+    # 🚨 The plans must use the statistics of this ANALYZE. The pool sessions
+    # report their inserts after it, so autovacuum would analyze the labels again
+    # during the workload, and one more row can change a plan.
     with connect() as conn:
-        for label in (*VERTEX_LABELS, *EDGE_LABELS):
-            conn.execute(sql.SQL('ANALYZE {}').format(sql.Identifier(driver.graph, label)))
+        for label in LABEL_TABLES:
+            table = sql.Identifier(driver.graph, label)
+            conn.execute(sql.SQL('ALTER TABLE {} SET (autovacuum_enabled = off)').format(table))
+            conn.execute(sql.SQL('ANALYZE {}').format(table))
     return {
         **people,
         'episode_1': episode_1,
@@ -646,12 +656,9 @@ def test_the_workload_calls_every_interface_method():
 
 async def test_every_statement_reads_its_labels_through_an_index(driver):
     seed = await _seed(driver)
-    recorded: list[tuple[str, str, Any]] = []
-    current = ['']
+    recorded: list[tuple[str, Any]] = []
     driver._store.statement_hooks.append(
-        lambda statement, args, kind: (
-            recorded.append((current[0], statement, args)) if kind == 'own' else None
-        )
+        lambda statement, args, kind: recorded.append((statement, args)) if kind == 'own' else None
     )
 
     workload = [
@@ -660,23 +667,23 @@ async def test_every_statement_reads_its_labels_through_an_index(driver):
     ]
     # Searches first: the operations end with whole-graph deletes.
     workload.sort(key=lambda entry: entry[2] is driver.graph_operations_interface)
+    # 🚨 The whole-graph deletes run last, as each plan below is read before them.
+    assert {name for name, _, _ in workload[-len(WHOLE_GRAPH) :]} == WHOLE_GRAPH
     silent = []
-    for name, call, interface in workload:
-        current[0] = name
-        before = len(recorded)
-        await call(interface, driver, seed)
-        if len(recorded) == before and name not in NO_STATEMENT:
-            silent.append(name)
-    assert silent == [], f'sent no statement: {silent}'
-    assert _default_label_rows(driver.graph) == 0
-
     problems = []
-    for name, statement, args in recorded:
+    for name, call, interface in workload:
+        recorded.clear()
+        await call(interface, driver, seed)
+        if not recorded and name not in NO_STATEMENT:
+            silent.append(name)
         if name in WHOLE_GRAPH:
             continue
-        plan = _plan(statement, args)
-        if 'Disabled: true' in plan or _unindexed_label_scans(plan):
-            problems.append(f'[{name}]\n{statement}\n{plan}')
+        for statement, args in recorded:
+            plan = _plan(statement, args)
+            if 'Disabled: true' in plan or _unindexed_label_scans(plan):
+                problems.append(f'[{name}]\n{statement}\n{plan}')
+    assert silent == [], f'sent no statement: {silent}'
+    assert _default_label_rows(driver.graph) == 0
     assert not problems, '\n\n'.join(problems)
 
 
