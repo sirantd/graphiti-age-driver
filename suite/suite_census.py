@@ -1,4 +1,4 @@
-"""The census of graphiti-core 0.31.2's suite that the AGE gate runs.
+"""The census of graphiti-core 0.32.0's suite that the AGE gate runs.
 
 ``suite/conftest.py`` runs and deselects by these lists, and
 ``tests/test_suite_pins.py`` checks them against the fetched suite. A graphiti

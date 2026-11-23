@@ -113,6 +113,9 @@ def _operations() -> dict[str, Call]:
         'node_save_bulk': lambda o, d, s: o.node_save_bulk(
             None, d, None, [new_entity(), new_entity()]
         ),
+        'node_update_bulk': lambda o, d, s: o.node_update_bulk(
+            None, d, None, [s['alice'], new_entity()]
+        ),
         'node_delete_by_group_id': lambda o, d, s: o.node_delete_by_group_id(None, d, 'absent'),
         'node_delete_by_uuids': lambda o, d, s: o.node_delete_by_uuids(None, d, [absent]),
         'node_get_by_uuid': lambda o, d, s: o.node_get_by_uuid(None, d, s['alice'].uuid),
@@ -214,6 +217,9 @@ def _operations() -> dict[str, Call]:
         # (get_community_clusters, also on FalkorDB).
         'edge_save_bulk': lambda o, d, s: o.edge_save_bulk(
             None, d, None, [_relates(s['carol'], s['carol']).model_dump()]
+        ),
+        'edge_update_bulk': lambda o, d, s: o.edge_update_bulk(
+            None, d, None, [s['knows'].model_dump()]
         ),
         'edge_delete_by_uuids': lambda o, d, s: o.edge_delete_by_uuids(None, d, [absent]),
         'edge_get_by_uuid': lambda o, d, s: o.edge_get_by_uuid(None, d, s['knows'].uuid),
@@ -388,11 +394,14 @@ NO_STATEMENT = frozenset({'build_node_search_filters', 'build_edge_search_filter
 
 # The parameters that graphiti sends with each reviewed text of the generic path.
 _GENERIC_PARAMS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
-    'graphiti_core.graphiti.Graphiti._get_or_create_saga': lambda s: {
+    'graphiti_core.graphiti.Graphiti._find_saga': lambda s: {
         'name': s['saga'].name,
         'group_id': GROUP,
     },
-    'graphiti_core.graphiti.Graphiti.remove_episode': lambda s: {'uuid': s['alice'].uuid},
+    'graphiti_core.graphiti.Graphiti.remove_episode': lambda s: {
+        'uuid': s['alice'].uuid,
+        'group_id': GROUP,
+    },
 }
 # The MCP get_status tool counts every vertex of the graph by design.
 WHOLE_GRAPH_GENERIC = frozenset({'mcp_server.graphiti_mcp_server.get_status'})

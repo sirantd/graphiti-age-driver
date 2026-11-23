@@ -49,11 +49,11 @@ def _test_functions(path: pathlib.Path) -> list[ast.AsyncFunctionDef | ast.Funct
 
 
 def test_the_suite_is_the_release_that_is_installed(fetched):
-    """📌 0.31.2 is graphiti_core_version in the homelab role truenas-graphiti."""
+    """📌 0.32.0 is graphiti_core_version in the homelab role truenas-graphiti."""
     installed = importlib.metadata.version('graphiti-core')
     source = tomllib.loads((fetched / 'graphiti-pyproject.toml').read_text())['project']['version']
 
-    assert installed == '0.31.2'
+    assert installed == '0.32.0'
     assert source == installed
 
 

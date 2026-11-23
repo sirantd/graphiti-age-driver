@@ -24,11 +24,10 @@ dependencies = [
 # because graphiti-core's own suite is the only drift detector for the two
 # driver interfaces.
 #
-# 📌 0.31.2 is graphiti_core_version in the homelab role truenas-graphiti when
-# Stage B of homelab#332 started (2026-11-09). A bump is out of scope until the
-# cutover is done. ci/pins.env pins the matching test sources.
+# 📌 0.32.0 is graphiti_core_version in the homelab role truenas-graphiti
+# (2026-11-24). ci/pins.env pins the matching test sources.
 test = [
-  "graphiti-core==0.31.2",
+  "graphiti-core==0.32.0",
   # As the homelab graphiti image pins it (Dockerfile.j2): openai 3 swapped
   # httpx for httpx2, and graphiti-core imports httpx without declaring it.
   "openai>=2.41.0,<3",

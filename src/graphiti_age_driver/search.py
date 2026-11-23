@@ -15,7 +15,7 @@ expressions of the properties:
   edge labels (``[:A|B*1..3]`` is a syntax error), and they load the graph into
   a cache in each backend.
 
-Each method keeps the rows of graphiti-core 0.31.2's FalkorDB fallback for it:
+Each method keeps the rows of graphiti-core 0.32.0's FalkorDB fallback for it:
 the same filters, the filter before the limit, the same score threshold.
 """
 
@@ -210,7 +210,7 @@ def _edge_rows_to_edges(rows: list[tuple[Any, ...]]) -> list[Any]:
 
 
 class AGESearchInterface(SearchInterface):
-    """Every method of graphiti-core 0.31.2's search interface."""
+    """Every method of graphiti-core 0.32.0's search interface."""
 
     # --------------------------
     # Full text

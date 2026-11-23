@@ -1,4 +1,4 @@
-"""The driver surface against graphiti-core 0.31.2 — server-free.
+"""The driver surface against graphiti-core 0.32.0 — server-free.
 
 graphiti-core asks the driver's two interface objects first, and on a
 ``NotImplementedError`` (or with no object) it runs its own provider Cypher.
@@ -33,9 +33,9 @@ def _interface_methods(interface: type) -> list[str]:
 @pytest.mark.parametrize(
     ('interface', 'implementation', 'count'),
     [
-        # The counts are the census of graphiti-core 0.31.2. A new method in a
+        # The counts are the census of graphiti-core 0.32.0. A new method in a
         # bump changes the count and fails here, before it falls back to Cypher.
-        (GraphOperationsInterface, AGEGraphOperations, 85),
+        (GraphOperationsInterface, AGEGraphOperations, 87),
         (SearchInterface, AGESearchInterface, 14),
     ],
 )

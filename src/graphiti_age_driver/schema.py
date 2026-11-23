@@ -2,7 +2,7 @@
 
 Each graphiti group is one AGE graph (homelab#332, story 32), as each group is
 one FalkorDB graph today. A graph has the four vertex labels and the five edge
-labels of graphiti-core 0.31.2, and each label is one PostgreSQL table.
+labels of graphiti-core 0.32.0, and each label is one PostgreSQL table.
 
 🚨 One label for each vertex. AGE gives a vertex exactly one label: ``SET
 n:Label`` and a second label on ``CREATE`` do not work (measured on
