@@ -1,7 +1,7 @@
 # graphiti-age-driver
 
 An [Apache AGE](https://age.apache.org/) graph driver for
-[graphiti-core](https://github.com/getzep/graphiti) 0.31.2.
+[graphiti-core](https://github.com/getzep/graphiti) 0.32.0.
 
 It replaces graphiti's FalkorDB driver in a homelab deployment
 ([homelab#332](https://github.com/sirantd/homelab/issues/332)). The graphs move
@@ -26,7 +26,7 @@ is a later stage of homelab#332, in the homelab image build.
 ## Use
 
 graphiti-core is a peer dependency: install the driver into an environment
-that already has graphiti-core 0.31.2. Pin the driver by commit SHA.
+that already has graphiti-core 0.32.0. Pin the driver by commit SHA.
 
 ```python
 from graphiti_core import Graphiti
@@ -129,7 +129,7 @@ AGE 1.8.0 makes the `id` index of a vertex label, and the `start_id` and
 ## Query rules
 
 The driver implements every method of graphiti's graph-operations interface
-(85) and search interface (14). graphiti uses these first, so graphiti's
+(87) and search interface (14). graphiti uses these first, so graphiti's
 FalkorDB Cypher never runs. Each method keeps the rows, the order and the
 errors of graphiti's FalkorDB fallback.
 

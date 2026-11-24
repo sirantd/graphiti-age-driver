@@ -12,9 +12,11 @@ interfaces runs as portable Cypher. Two rules guard that path:
 
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
 import logging
+import textwrap
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
@@ -65,8 +67,16 @@ def test_graphiti_core_still_sends_each_reviewed_query(name):
     strict suite or production meets the new text."""
     module_name, class_name, function_name = name.rsplit('.', 2)
     function = getattr(getattr(importlib.import_module(module_name), class_name), function_name)
+    # The parser joins adjacent string literals, as Python does at run time: from
+    # 0.32.0 remove_episode builds its text from three literals.
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    literals = {
+        ' '.join(node.value.split())
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
 
-    assert ' '.join(REVIEWED_QUERIES[name].split()) in ' '.join(inspect.getsource(function).split())
+    assert ' '.join(REVIEWED_QUERIES[name].split()) in literals
 
 
 @pytest.mark.integration

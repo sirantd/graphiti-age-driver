@@ -19,7 +19,7 @@ It runs portable Cypher only:
   query comes from a FalkorDB branch of graphiti that leaked past the
   interfaces, and it must fail loudly.
 * Every other text is compared with :data:`GENERIC_QUERIES`, the reviewed list
-  of graphiti-core 0.31.2 and of the MCP server. In strict mode an unknown text
+  of graphiti-core 0.32.0 and of the MCP server. In strict mode an unknown text
   is refused; otherwise it runs, with one warning for each distinct text.
 """
 
@@ -90,23 +90,26 @@ def _normalize(query: str) -> str:
 
 
 # The reviewed generic queries, by the function that sends each one outside the
-# two interfaces: graphiti-core 0.31.2, and the MCP server at the homelab ref
-# 16bf5143. ``tests/test_generic_path.py`` checks that graphiti-core still
+# two interfaces: graphiti-core 0.32.0, and the MCP server at the homelab ref
+# a61333ed (mcp-v1.1.4). ``tests/test_generic_path.py`` checks that graphiti-core still
 # sends each text, and ``tests/test_plans.py`` checks the plan of each one.
 #
-# 📌 homelab#332 names only the saga lookup. graphiti-core 0.31.2 has a second
-# one: remove_episode, the MCP delete_episode tool.
+# 📌 homelab#332 names only the saga lookup. graphiti-core has a second one:
+# remove_episode, the MCP delete_episode tool. From 0.32.0 the saga lookup is in
+# _find_saga, and the remove_episode count is scoped to the episode's group.
 REVIEWED_QUERIES: dict[str, str] = {
     # add_episode with a saga.
-    'graphiti_core.graphiti.Graphiti._get_or_create_saga': """
+    'graphiti_core.graphiti.Graphiti._find_saga': """
             MATCH (s:Saga {name: $name, group_id: $group_id})
             RETURN s.uuid AS uuid, s.name AS name, s.group_id AS group_id,
                    s.created_at AS created_at, s.first_episode_uuid AS first_episode_uuid,
                    s.last_episode_uuid AS last_episode_uuid
             """,
-    # One count for each entity that the episode mentions.
+    # One count for each entity that the episode mentions, in the episode's group.
     'graphiti_core.graphiti.Graphiti.remove_episode': (
-        'MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) RETURN count(*) AS episode_count'
+        'MATCH (e:Episodic {group_id: $group_id})-[:MENTIONS]->'
+        '(n:Entity {uuid: $uuid, group_id: $group_id}) '
+        'RETURN count(*) AS episode_count'
     ),
     # The get_status tool, through session().run(). It counts the whole graph.
     'mcp_server.graphiti_mcp_server.get_status': 'MATCH (n) RETURN count(n) as count',
@@ -117,15 +120,15 @@ GENERIC_QUERIES: frozenset[str] = frozenset(_normalize(q) for q in REVIEWED_QUER
 # map to `properties @> {...}`, which no btree index serves, so the text reads
 # the whole label. Each AGE form returns the same rows through a WHERE lookup.
 _AGE_FORMS: dict[str, str] = {
-    'graphiti_core.graphiti.Graphiti._get_or_create_saga': """
+    'graphiti_core.graphiti.Graphiti._find_saga': """
             MATCH (s:Saga) WHERE s.name = $name AND s.group_id = $group_id
             RETURN s.uuid AS uuid, s.name AS name, s.group_id AS group_id,
                    s.created_at AS created_at, s.first_episode_uuid AS first_episode_uuid,
                    s.last_episode_uuid AS last_episode_uuid
             """,
     'graphiti_core.graphiti.Graphiti.remove_episode': """
-            MATCH (n:Entity) WHERE n.uuid = $uuid
-            MATCH (e:Episodic)-[:MENTIONS]->(n)
+            MATCH (n:Entity) WHERE n.uuid = $uuid AND n.group_id = $group_id
+            MATCH (e:Episodic)-[:MENTIONS]->(n) WHERE e.group_id = $group_id
             RETURN count(*) AS episode_count
             """,
 }

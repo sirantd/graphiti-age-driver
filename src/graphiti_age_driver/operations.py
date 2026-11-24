@@ -1,6 +1,6 @@
 """graphiti's graph-operations interface on AGE.
 
-Each method keeps the semantics of graphiti-core 0.31.2's FalkorDB fallback for
+Each method keeps the semantics of graphiti-core 0.32.0's FalkorDB fallback for
 it (``nodes.py``, ``edges.py``, ``search_utils.py``, ``community_operations.py``,
 ``graph_data_operations.py``): the same rows, the same order, the same errors.
 The queries are new, for the rules of AGE 1.8.0 (homelab#332, Stage A):
@@ -247,8 +247,12 @@ async def upsert_vertices(
     label: str,
     props_list: list[dict[str, Any]],
     tx: AGEDriverSession | None = None,
+    create_absent: bool = True,
 ) -> None:
     """Create the absent uuids, then replace the properties of each vertex.
+
+    With ``create_absent=False`` an absent uuid is not created, so only the
+    vertices that exist change: graphiti's ``node_update_bulk``.
 
     ``SET n = props`` replaces the map, as graphiti's ``SET n = $data`` does on
     FalkorDB. For an entity the extra labels accumulate, as FalkorDB labels do:
@@ -282,9 +286,11 @@ async def upsert_vertices(
             WITH n, row.props AS props
             SET n = props
         """
-    await driver._write(
-        [(create, {'uuids': [row['uuid'] for row in rows]}), (update, {'rows': rows})], tx=tx
-    )
+    statements: list[tuple[str, dict[str, Any] | None]] = []
+    if create_absent:
+        statements.append((create, {'uuids': [row['uuid'] for row in rows]}))
+    statements.append((update, {'rows': rows}))
+    await driver._write(statements, tx=tx)
 
 
 async def upsert_edges(
@@ -292,8 +298,12 @@ async def upsert_edges(
     label: str,
     rows: list[dict[str, Any]],
     tx: AGEDriverSession | None = None,
+    create_absent: bool = True,
 ) -> None:
     """Create each absent edge between its two ends, then replace its properties.
+
+    With ``create_absent=False`` an absent edge is not created, so only the
+    edges that exist change: graphiti's ``edge_update_bulk``.
 
     As graphiti's ``MERGE (s)-[e:L {uuid}]->(t)`` on FalkorDB: an edge whose end
     is absent is not written. The edge uuid is unique for each label, so a uuid
@@ -308,19 +318,20 @@ async def upsert_edges(
     source_label, target_labels = _ENDS[label]
     statements: list[tuple[str, dict[str, Any] | None]] = []
     for target_label in target_labels:
-        statements.append(
-            (
-                f"""
-                UNWIND $rows AS row
-                MATCH (s:{source_label}) WHERE s.uuid = row.source
-                MATCH (t:{target_label}) WHERE t.uuid = row.target
-                OPTIONAL MATCH (s)-[e:{label}]->(t) WHERE e.uuid = row.uuid
-                WITH s, t, row, e WHERE e IS NULL
-                CREATE (s)-[:{label} {{uuid: row.uuid}}]->(t)
-                """,
-                {'rows': rows},
+        if create_absent:
+            statements.append(
+                (
+                    f"""
+                    UNWIND $rows AS row
+                    MATCH (s:{source_label}) WHERE s.uuid = row.source
+                    MATCH (t:{target_label}) WHERE t.uuid = row.target
+                    OPTIONAL MATCH (s)-[e:{label}]->(t) WHERE e.uuid = row.uuid
+                    WITH s, t, row, e WHERE e IS NULL
+                    CREATE (s)-[:{label} {{uuid: row.uuid}}]->(t)
+                    """,
+                    {'rows': rows},
+                )
             )
-        )
         statements.append(
             (
                 f"""
@@ -525,7 +536,7 @@ async def _load_embeddings(
 
 
 class AGEGraphOperations(GraphOperationsInterface):
-    """Every method of graphiti-core 0.31.2's graph-operations interface."""
+    """Every method of graphiti-core 0.32.0's graph-operations interface."""
 
     # --------------------------
     # Entity nodes
@@ -547,6 +558,20 @@ class AGEGraphOperations(GraphOperationsInterface):
     ) -> None:
         props = [_entity_props(_entity_data(node)) for node in nodes]
         await upsert_vertices(_age(driver), ENTITY, props, tx=_session(transaction))
+
+    async def node_update_bulk(
+        self,
+        _cls: Any,
+        driver: Any,
+        transaction: Any,
+        nodes: list[Any],
+        batch_size: int = 100,
+    ) -> None:
+        """Concurrent ingestion only: a node that another writer deleted stays deleted."""
+        props = [_entity_props(_entity_data(node)) for node in nodes]
+        await upsert_vertices(
+            _age(driver), ENTITY, props, tx=_session(transaction), create_absent=False
+        )
 
     async def node_delete_by_group_id(
         self,
@@ -979,6 +1004,20 @@ class AGEGraphOperations(GraphOperationsInterface):
     ) -> None:
         rows = [_entity_edge_row(edge) for edge in edges]
         await upsert_edges(_age(driver), RELATES_TO, rows, tx=_session(transaction))
+
+    async def edge_update_bulk(
+        self,
+        _cls: Any,
+        driver: Any,
+        transaction: Any,
+        edges: list[Any],
+        batch_size: int = 100,
+    ) -> None:
+        """Concurrent ingestion only: an edge that another writer deleted stays deleted."""
+        rows = [_entity_edge_row(edge) for edge in edges]
+        await upsert_edges(
+            _age(driver), RELATES_TO, rows, tx=_session(transaction), create_absent=False
+        )
 
     async def edge_delete_by_uuids(
         self,
